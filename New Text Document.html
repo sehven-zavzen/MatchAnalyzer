@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Futbol Bahis Analiz Sistemi</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState } = React;
+        
+        // Lucide icons için basit SVG componentleri
+        const Search = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+            </svg>
+        );
+        
+        const Activity = ({size = 24}) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+        );
+        
+        const AlertCircle = ({size = 24}) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+        );
+        
+        const TrendingUp = ({size = 24}) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                <polyline points="17 6 23 6 23 12"></polyline>
+            </svg>
+        );
+
+        const FootballBettingAnalyzer = () => {
+          const [apiKey, setApiKey] = useState('b400192aff764fe4914794cea3d0d846');
+          const [matches, setMatches] = useState([]);
+          const [loading, setLoading] = useState(false);
+          const [selectedLeague, setSelectedLeague] = useState('PL');
+          const [error, setError] = useState('');
+
+          const leagues = [
+            { id: 'PL', name: 'Premier League', country: 'İngiltere' },
+            { id: 'PD', name: 'La Liga', country: 'İspanya' },
+            { id: 'BL1', name: 'Bundesliga', country: 'Almanya' },
+            { id: 'SA', name: 'Serie A', country: 'İtalya' },
+            { id: 'FL1', name: 'Ligue 1', country: 'Fransa' },
+            { id: 'DED', name: 'Eredivisie', country: 'Hollanda' },
+            { id: 'PPL', name: 'Primeira Liga', country: 'Portekiz' }
+          ];
+
+          const analyzeTeamStats = (matches) => {
+            if (!matches || matches.length === 0) return { goalsFor: 0, goalsAgainst: 0 };
+            
+            let goalsFor = 0;
+            let goalsAgainst = 0;
+            let count = 0;
+
+            matches.forEach(match => {
+              if (match.score?.fullTime?.home !== null && match.score?.fullTime?.away !== null) {
+                goalsFor += match.score.fullTime.home || 0;
+                goalsAgainst += match.score.fullTime.away || 0;
+                count++;
+              }
+            });
+
+            return {
+              goalsFor: count > 0 ? goalsFor / count : 0,
+              goalsAgainst: count > 0 ? goalsAgainst / count : 0
+            };
+          };
+
+          const analyzeMatch = (homeMatches, awayMatches) => {
+            const homeStats = analyzeTeamStats(homeMatches);
+            const awayStats = analyzeTeamStats(awayMatches);
+
+            const totalAvg = homeStats.goalsFor + awayStats.goalsFor;
+            const homeTeamTotal = homeStats.goalsFor + homeStats.goalsAgainst;
+            const awayTeamTotal = awayStats.goalsFor + awayStats.goalsAgainst;
+
+            return {
+              over25: totalAvg > 2.5,
+              over25Score: Math.min((totalAvg / 2.5 * 100), 100).toFixed(0),
+              total23: totalAvg >= 2.0 && totalAvg <= 3.5,
+              total23Score: totalAvg >= 2.0 && totalAvg <= 3.5 ? 85 : 40,
+              homeOver15: homeTeamTotal > 1.5,
+              homeOver15Score: Math.min((homeTeamTotal / 1.5 * 100), 100).toFixed(0),
+              awayOver15: awayTeamTotal > 1.5,
+              awayOver15Score: Math.min((awayTeamTotal / 1.5 * 100), 100).toFixed(0),
+              totalAvg: totalAvg.toFixed(2),
+              homeAvg: homeTeamTotal.toFixed(2),
+              awayAvg: awayTeamTotal.toFixed(2)
+            };
+          };
+
+          const fetchMatches = async () => {
+            if (!apiKey) {
+              setError('Lütfen API Key girin');
+              return;
+            }
+
+            setLoading(true);
+            setError('');
+            
+            try {
+              // Önce ligin maçlarını çek
+              const matchesResponse = await fetch(
+                `/api/competitions/${selectedLeague}/matches?status=SCHEDULED`
+              );
+
+              const matchesData = await matchesResponse.json();
+              
+              console.log('API Response:', matchesData);
+              
+              if (matchesData.errorCode) {
+                setError('API Hatası: ' + matchesData.message);
+                setLoading(false);
+                return;
+              }
+              
+              if (!matchesData.matches || matchesData.matches.length === 0) {
+                setError('Bu lig için yaklaşan maç bulunamadı. Başka bir lig deneyin.');
+                setLoading(false);
+                return;
+              }
+
+              // İlk 8 maç için detaylı analiz yap
+              const matchesWithStats = await Promise.all(
+                matchesData.matches.slice(0, 8).map(async (match) => {
+                  try {
+                    // Ev sahibi takımın son maçları
+                    const homeMatchesResponse = await fetch(
+                      `/api/teams/${match.homeTeam.id}/matches?limit=10&status=FINISHED`
+                    );
+
+                    // Deplasman takımın son maçları
+                    const awayMatchesResponse = await fetch(
+                      `/api/teams/${match.awayTeam.id}/matches?limit=10&status=FINISHED`
+                    );
+
+                    const homeMatchesData = await homeMatchesResponse.json();
+                    const awayMatchesData = await awayMatchesResponse.json();
+
+                    // Sadece ev sahibi olduğu maçları filtrele
+                    const homeHomeMatches = homeMatchesData.matches?.filter(m => 
+                      m.homeTeam.id === match.homeTeam.id
+                    ) || [];
+
+                    // Sadece deplasman olduğu maçları filtrele
+                    const awayAwayMatches = awayMatchesData.matches?.filter(m => 
+                      m.awayTeam.id === match.awayTeam.id
+                    ) || [];
+
+                    return {
+                      match,
+                      analysis: analyzeMatch(homeHomeMatches, awayAwayMatches)
+                    };
+                  } catch (err) {
+                    console.error('İstatistik hatası:', err);
+                    return null;
+                  }
+                })
+              );
+
+              setMatches(matchesWithStats.filter(m => m !== null));
+              setLoading(false);
+            } catch (err) {
+              setError('API hatası: ' + err.message);
+              setLoading(false);
+            }
+          };
+
+          const getScoreColor = (score) => {
+            if (score >= 75) return 'text-green-600 bg-green-50';
+            if (score >= 60) return 'text-yellow-600 bg-yellow-50';
+            return 'text-red-600 bg-red-50';
+          };
+
+          return (
+            <div className="min-h-screen bg-gray-50 p-4">
+              <div className="max-w-7xl mx-auto">
+                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                  <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center gap-2">
+                    <Activity />
+                    Futbol Bahis Analiz Sistemi
+                  </h1>
+                  <p className="text-gray-600 mb-6">Üst 2.5, Toplam Gol 2-3, Ev/Dep 1.5 Üst Analizi</p>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle size={20} />
+                      <div className="text-sm text-gray-700">
+                        <p className="font-semibold mb-2">API Key Almak İçin (Ücretsiz - Kredi Kartı Gerektirmez):</p>
+                        <ol className="list-decimal ml-4 space-y-1">
+                          <li><a href="https://www.football-data.org/client/register" target="_blank" className="text-blue-600 underline">football-data.org/client/register</a> - Email ile üye olun</li>
+                          <li>Email'inizi doğrulayın</li>
+                          <li>Login olun ve API Key'inizi kopyalayın</li>
+                          <li>Günde 10 istek hakkınız var (ücretsiz)</li>
+                        </ol>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        API Key (Football-Data.org)
+                      </label>
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="Football-Data.org API Key'inizi girin"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Lig Seçin
+                      </label>
+                      <select
+                        value={selectedLeague}
+                        onChange={(e) => setSelectedLeague(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        {leagues.map(league => (
+                          <option key={league.id} value={league.id}>
+                            {league.name} ({league.country})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={fetchMatches}
+                    disabled={loading || !apiKey}
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Search />
+                    {loading ? 'Analiz Ediliyor... (10-15 saniye sürebilir)' : 'Maçları Analiz Et'}
+                  </button>
+
+                  {error && (
+                    <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                      {error}
+                    </div>
+                  )}
+                </div>
+
+                {matches.length > 0 && (
+                  <div className="space-y-4">
+                    {matches.map((matchData, idx) => {
+                      const { match, analysis } = matchData;
+                      const matchDate = new Date(match.utcDate);
+                      
+                      return (
+                        <div key={idx} className="bg-white rounded-lg shadow-md p-6">
+                          <div className="flex justify-between items-start mb-4">
+                            <div className="flex-1">
+                              <div className="text-sm text-gray-500 mb-2">
+                                {matchDate.toLocaleDateString('tr-TR', { 
+                                  weekday: 'long', 
+                                  year: 'numeric', 
+                                  month: 'long', 
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </div>
+                              <div className="text-xl font-bold text-gray-800">
+                                {match.homeTeam.name} vs {match.awayTeam.name}
+                              </div>
+                              <div className="text-sm text-gray-500 mt-1">
+                                {match.competition.name}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className={`p-4 rounded-lg ${getScoreColor(analysis.over25Score)}`}>
+                              <div className="text-sm font-medium mb-1">ÜST 2.5</div>
+                              <div className="text-2xl font-bold">{analysis.over25Score}%</div>
+                              <div className="text-xs mt-1">Ort: {analysis.totalAvg}</div>
+                              <div className="text-xs font-semibold mt-2">
+                                {analysis.over25 ? '✓ ÖNERİLİR' : '✗ ÖNERİLMEZ'}
+                              </div>
+                            </div>
+
+                            <div className={`p-4 rounded-lg ${getScoreColor(analysis.total23Score)}`}>
+                              <div className="text-sm font-medium mb-1">TOPLAM 2-3</div>
+                              <div className="text-2xl font-bold">{analysis.total23Score}%</div>
+                              <div className="text-xs mt-1">Ort: {analysis.totalAvg}</div>
+                              <div className="text-xs font-semibold mt-2">
+                                {analysis.total23 ? '✓ ÖNERİLİR' : '✗ ÖNERİLMEZ'}
+                              </div>
+                            </div>
+
+                            <div className={`p-4 rounded-lg ${getScoreColor(analysis.homeOver15Score)}`}>
+                              <div className="text-sm font-medium mb-1">EV 1.5 ÜST</div>
+                              <div className="text-2xl font-bold">{analysis.homeOver15Score}%</div>
+                              <div className="text-xs mt-1">Ort: {analysis.homeAvg}</div>
+                              <div className="text-xs font-semibold mt-2">
+                                {analysis.homeOver15 ? '✓ ÖNERİLİR' : '✗ ÖNERİLMEZ'}
+                              </div>
+                            </div>
+
+                            <div className={`p-4 rounded-lg ${getScoreColor(analysis.awayOver15Score)}`}>
+                              <div className="text-sm font-medium mb-1">DEP 1.5 ÜST</div>
+                              <div className="text-2xl font-bold">{analysis.awayOver15Score}%</div>
+                              <div className="text-xs mt-1">Ort: {analysis.awayAvg}</div>
+                              <div className="text-xs font-semibold mt-2">
+                                {analysis.awayOver15 ? '✓ ÖNERİLİR' : '✗ ÖNERİLMEZ'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {(analysis.over25 || analysis.total23 || analysis.homeOver15 || analysis.awayOver15) && (
+                            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                              <div className="flex items-center gap-2 text-green-700 font-semibold">
+                                <TrendingUp size={18} />
+                                <span>Bu maç bahis için uygun görünüyor!</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {matches.length === 0 && !loading && (
+                  <div className="bg-white rounded-lg shadow-md p-12 text-center">
+                    <Activity size={48} />
+                    <p className="text-gray-600 mt-4">API Key girin ve "Maçları Analiz Et" butonuna tıklayın</p>
+                    <p className="text-sm text-gray-500 mt-2">Not: İlk analiz 10-15 saniye sürebilir</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        ReactDOM.render(<FootballBettingAnalyzer />, document.getElementById('root'));
+    </script>
+</body>
+</html>
